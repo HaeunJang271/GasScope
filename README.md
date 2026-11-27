@@ -2,11 +2,12 @@
 
 Static Gas & Allocation Profiler + FlameGraph IDE + On-Chain Registry for Gno.land
 
-- [Web App](https://gas-scope-sigma.vercel.app)
-- [On-Chain Registry (`gasscope_reg` on Onyx)](https://onyx.testnets.gno.land/r/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasscope_reg)
 [![GasScope Demo](https://img.youtube.com/vi/YKaQ05D91SE/hqdefault.jpg)](https://youtu.be/YKaQ05D91SE)
 
 [Watch on YouTube](https://youtu.be/YKaQ05D91SE)
+
+- [Web App](https://gas-scope-sigma.vercel.app)
+- [On-Chain Registry (`gasscope_reg` on Onyx)](https://onyx.testnets.gno.land/r/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasscope_reg)
 
 <!-- TODO: Add YouTube demo video link -->
 
