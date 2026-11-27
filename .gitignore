@@ -1,5 +1,3 @@
 node_modules/
 web/dist/
-web/public/profile.wasm
-web/public/wasm_exec.js
 /gasscope-report.*
