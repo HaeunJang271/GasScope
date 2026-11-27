@@ -1,0 +1,52 @@
+name: GasScope PR analysis
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run ./cmd/gasscope analyze ./...
+      - name: Compare baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MAX_INCREASE: ${{ vars.GASSCOPE_MAX_INCREASE }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/gasscope-base"
+          git worktree add --detach "$base" "$BASE_SHA"
+          if [[ -n "$(git -C "$base" ls-files -- '*.gno')" ]]; then
+            mkdir -p "$RUNNER_TEMP/gasscope-baseline"
+            go build -o "$RUNNER_TEMP/gasscope" ./cmd/gasscope
+            (
+              cd "$RUNNER_TEMP/gasscope-baseline"
+              "$RUNNER_TEMP/gasscope" analyze "$base"
+            )
+            before=$(jq -er '.totalGas' "$RUNNER_TEMP/gasscope-baseline/gasscope-report.json")
+            after=$(jq -er '.totalGas' gasscope-report.json)
+            delta=$((after - before))
+            echo "GasScope estimated points: $before → $after ($delta)" >> "$GITHUB_STEP_SUMMARY"
+            if [[ -n "$MAX_INCREASE" ]]; then
+              [[ "$MAX_INCREASE" =~ ^(0|[1-9][0-9]*)$ ]]
+              if (( delta > MAX_INCREASE )); then
+                echo "::error::Static gas increase $delta exceeds budget $MAX_INCREASE"
+                exit 1
+              fi
+            fi
+          else
+            echo "No Gno source on the base commit. This PR establishes the baseline." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gasscope-report
+          path: |
+            gasscope-report.json
+            gasscope-report.svg
