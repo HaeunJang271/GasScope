@@ -5,6 +5,8 @@ export const registry = import.meta.env.VITE_REGISTRY_PATH || 'gno.land/r/g1832j
 const chain = 'onyx-1';
 const realmPattern = /^gno\.land\/r\/[a-z0-9_]+(?:\/[a-z0-9_]+)+$/;
 
+class PackageUnavailableError extends Error {}
+
 export function normalizeRealm(input: string): string {
   let realm = input.trim().replace(/^https?:\/\//, '').replace(/^onyx\.testnets\.gno\.land\//, 'gno.land/').replace(/\/$/, '');
   if (realm.startsWith('r/')) realm = 'gno.land/' + realm;
@@ -21,7 +23,11 @@ async function query(path: string, input: string): Promise<string> {
   const body = await response.json();
   const responseData = body.result?.response ?? body.result?.Response;
   const result = responseData?.ResponseBase ?? responseData;
-  if (!result || body.error || result.error || result.Error || Number(result.code ?? 0)) {
+  if (!result || body.error || result.error || result.Error || Number(result.code ?? result.Code ?? 0)) {
+    const details = JSON.stringify([body.error, result?.error, result?.Error, result?.log, result?.Log]);
+    if (/\b(?:InvalidPkgPathError|InvalidPackageError|package not found|package "[^"]+" is not available)\b/i.test(details.replaceAll('\\"', '"'))) {
+      throw new PackageUnavailableError('Realm package is unavailable on Onyx.');
+    }
     throw new Error(result?.log || result?.Log || result?.error?.message || body.error?.message || 'Onyx query failed.');
   }
   const encoded = result.data ?? result.Data ?? result.value ?? result.Value;
@@ -47,15 +53,28 @@ export interface RegistryRow {
   id: number; realmPath: string; totalGas: number; hotspotsCount: number;
   topRule: string; owner: string; verified: boolean;
 }
-export async function getLeaderboard(offset: number): Promise<{ rows: RegistryRow[]; render: string }> {
+export type Leaderboard =
+  | { kind: 'live'; rows: RegistryRow[]; render: string }
+  | { kind: 'preview'; rows: RegistryRow[] };
+
+const previewRows: RegistryRow[] = [
+  { id: 3, realmPath: 'gno.land/r/demo/tavern_scores', totalGas: 820, hotspotsCount: 6, topRule: 'CROSS_REALM_IN_LOOP', owner: '', verified: false },
+  { id: 2, realmPath: 'gno.land/r/demo/market', totalGas: 540, hotspotsCount: 4, topRule: 'UNBOUNDED_AVL_ITER', owner: '', verified: false },
+  { id: 1, realmPath: 'gno.land/r/demo/journal', totalGas: 290, hotspotsCount: 2, topRule: 'LOOP_STRING_CONCAT', owner: '', verified: false },
+];
+
+export async function getLeaderboard(offset: number): Promise<Leaderboard> {
   const path = normalizeRealm(registry);
-  const [list, render] = await Promise.all([
-    query('vm/qrender', path + ':profiles/' + offset),
-    query('vm/qrender', path + ':' + offset),
-  ]);
-  const rows: RegistryRow[] = JSON.parse(list);
-  if (!Array.isArray(rows)) throw new Error('Unexpected registry response.');
-  return { rows, render };
+  try {
+    const list = await query('vm/qrender', path + ':profiles/' + offset);
+    const rows: RegistryRow[] = JSON.parse(list);
+    if (!Array.isArray(rows)) throw new Error('Unexpected registry response.');
+    const render = await query('vm/qrender', path + ':' + offset);
+    return { kind: 'live', rows, render };
+  } catch (error) {
+    if (error instanceof PackageUnavailableError) return { kind: 'preview', rows: previewRows };
+    throw error;
+  }
 }
 
 type WalletReply<T> = { code: number; type: string; message: string; data: T };

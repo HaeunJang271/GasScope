@@ -4,12 +4,14 @@ import {
   Activity, ArrowDownToLine, ArrowRight, Braces, ChevronDown, ChevronRight, CircleAlert,
   Code2, FileCode2, Flame, GitBranch, Globe2, Layers3, RefreshCw, Search, Trophy, Upload, Wallet, Zap,
 } from 'lucide-react';
-import { analyze, demo, readReport, type FunctionProfile, type Report } from './profile';
-import { analyzeRealm, getLeaderboard, normalizeRealm, registry, submitProfile, type RegistryRow } from './onyx';
+import { demo, prepareAnalyzer, readReport, type FunctionProfile, type Report } from './profile';
+import { analyzeRealm, getLeaderboard, normalizeRealm, registry, submitProfile, type Leaderboard, type RegistryRow } from './onyx';
+import demoReport from './demo-report.json';
 import './style.css';
 
 type Tab = 'flame' | 'live' | 'leaderboard';
 type Session = { report: Report; sources: Record<string, string>; name: string; realm?: string; kind: 'demo' | 'live' | 'import' };
+const demoSession: Session = { report: demoReport, sources: demo, name: 'Tavern leaderboard', kind: 'demo' };
 const number = new Intl.NumberFormat('en-US');
 const format = (n: number) => number.format(n);
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -30,11 +32,11 @@ function download(report: Report) {
 
 function App() {
   const [tab, setTab] = useState<Tab>('flame');
-  const [session, setSession] = useState<Session>();
+  const [session, setSession] = useState<Session>(demoSession);
   const [request, setRequest] = useState('gno.land/r/gnoland/blog');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [leader, setLeader] = useState<{ rows: RegistryRow[]; render: string }>();
+  const [leader, setLeader] = useState<Leaderboard>();
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [leaderError, setLeaderError] = useState('');
@@ -44,17 +46,20 @@ function App() {
   const [submitRealm, setSubmitRealm] = useState('');
   const upload = useRef<HTMLInputElement>(null);
 
-  async function loadDemo() {
+  function loadDemo() {
     setError('');
-    setLoading(true);
-    try {
-      const report = await analyze(demo);
-      setSession({ report, sources: demo, name: 'Tavern leaderboard', kind: 'demo' });
-      setTab('flame');
-    } catch (error) { setError(errorText(error)); }
-    finally { setLoading(false); }
+    setSession(demoSession);
+    setTab('flame');
   }
-  useEffect(() => { void loadDemo(); }, []);
+  useEffect(() => {
+    const preload = () => { void prepareAnalyzer().catch(() => {}); };
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(preload, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(preload, 150);
+    return () => clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     if (tab !== 'leaderboard') return;
@@ -63,7 +68,7 @@ function App() {
     setLeaderError('');
     getLeaderboard(offset)
       .then(data => { if (!cancelled) setLeader(data); })
-      .catch(error => { if (!cancelled) setLeaderError(errorText(error)); });
+      .catch(() => { if (!cancelled) setLeaderError('The Onyx registry could not be loaded. Refresh to try again.'); });
     return () => { cancelled = true; };
   }, [tab, offset, refresh]);
 
@@ -95,7 +100,7 @@ function App() {
 
   async function broadcast(event: React.FormEvent) {
     event.preventDefault();
-    if (!session || session.kind === 'demo') return;
+    if (session.kind === 'demo') return;
     setSending(true);
     setSent('');
     setSendError('');
@@ -136,15 +141,13 @@ function App() {
             : tab === 'live' ? 'Fetch public realm source from Onyx and analyze it in your browser.'
             : 'Browse submitted profiles and publish your analysis to Onyx.'}</p>
         </div>
-        {tab === 'flame' && session && <button className="button export" onClick={() => download(session.report)}><ArrowDownToLine size={16}/> Export JSON</button>}
+        {tab === 'flame' && <button className="button export" onClick={() => download(session.report)}><ArrowDownToLine size={16}/> Export JSON</button>}
       </div>
       <nav className="navigation" aria-label="GasScope views">
         {tabs.map(({ id, name, Icon }) => <button key={id} onClick={() => switchTab(id)} aria-current={tab === id ? 'page' : undefined}><Icon size={16}/>{name}</button>)}
       </nav>
       {error && <div className="notice error" role="alert"><CircleAlert size={17}/>{error}</div>}
-      {tab === 'flame' && (session
-        ? <Profiler key={session.name + session.kind} session={session}/>
-        : loading && <div className="notice" role="status">Loading the demo profile…</div>)}
+      {tab === 'flame' && <Profiler key={session.name + session.kind} session={session}/>}
       {tab === 'live' && <section className="panel live-panel">
         <div className="panel-heading"><span className="panel-icon"><Globe2 size={19}/></span><div><h2>Analyze a realm</h2><p>Source is read directly from Onyx using <code>vm/qfile</code>.</p></div></div>
         <form onSubmit={runLive}>
@@ -153,7 +156,7 @@ function App() {
             <button className="button primary" disabled={loading}><Zap size={16}/>{loading ? 'Analyzing…' : 'Analyze realm'}</button></div>
         </form>
         <div className="demo-action"><span>Explore the profiler with a bundled sample realm.</span>
-          <button className="button" disabled={loading} onClick={() => void loadDemo()}>Load demo <ArrowRight size={15}/></button></div>
+          <button className="button" disabled={loading} onClick={loadDemo}>Load demo <ArrowRight size={15}/></button></div>
       </section>}
       {tab === 'leaderboard' && <div className="leader-layout">
         <section className="panel live-panel">
@@ -161,20 +164,26 @@ function App() {
             <button className="button refresh" aria-label="Refresh registry" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={16}/></button></div>
           {leaderError ? <div className="notice error" role="alert">{leaderError}</div> : !leader ? <p role="status">Loading registry…</p> :
             <>
+              {leader.kind === 'preview' && <div className="notice" role="status">
+                <CircleAlert size={17}/>
+                <span>On-chain registry is pending Onyx activation (GPAS passed). Showing preview entries below.</span>
+              </div>}
               {leader.rows.length === 0 ? <p>No submissions on this page.</p> : <div className="table-scroll"><table>
                 <thead><tr><th>ID / Realm</th><th>Gas points</th><th>Hotspots</th><th>Attestation</th></tr></thead>
                 <tbody>{leader.rows.map(row => <tr key={row.id}><td><code title={row.owner}>#{row.id} {row.realmPath}</code><small>{row.topRule}</small></td>
-                  <td>{format(row.totalGas)}</td><td>{row.hotspotsCount}</td><td>{row.verified ? 'Attested' : 'Pending'}</td></tr>)}</tbody>
+                  <td>{format(row.totalGas)}</td><td>{row.hotspotsCount}</td><td>{leader.kind === 'preview' ? 'Sample' : row.verified ? 'Attested' : 'Pending'}</td></tr>)}</tbody>
               </table></div>}
               {leader.rows.length > 0 && <RegistryChart rows={leader.rows}/>}
-              <details className="raw-render"><summary>Realm Render() output</summary><pre>{leader.render}</pre></details>
-              <div className="pagination"><button className="button" disabled={!offset} onClick={() => setOffset(n => n - 20)}>Previous</button>
-                <button className="button" disabled={leader.rows.length < 20} onClick={() => setOffset(n => n + 20)}>Next</button></div>
+              {leader.kind === 'live' && <>
+                <details className="raw-render"><summary>Realm Render() output</summary><pre>{leader.render}</pre></details>
+                <div className="pagination"><button className="button" disabled={!offset} onClick={() => setOffset(n => n - 20)}>Previous</button>
+                  <button className="button" disabled={leader.rows.length < 20} onClick={() => setOffset(n => n + 20)}>Next</button></div>
+              </>}
             </>}
         </section>
         <section className="panel live-panel">
           <div className="panel-heading"><span className="panel-icon"><Wallet size={18}/></span><div><h2>Publish profile</h2><p>Sign your submission with Adena.</p></div></div>
-          {session && session.kind !== 'demo' ? <form onSubmit={broadcast}>
+          {session.kind !== 'demo' ? <form onSubmit={broadcast}>
             <label htmlFor="submit-realm">Realm path</label>
             <input id="submit-realm" value={session.realm ?? submitRealm} readOnly={Boolean(session.realm)} onChange={event => setSubmitRealm(event.target.value)} required placeholder="gno.land/r/namespace/realm"/>
             <button className="button primary publish" disabled={sending}><Wallet size={16}/>{sending ? 'Waiting for Adena…' : 'Submit with Adena'}</button>

@@ -35,7 +35,7 @@ declare global {
 }
 
 let ready: Promise<void> | undefined;
-export async function analyze(sources: Record<string, string>): Promise<Report> {
+export function prepareAnalyzer(): Promise<void> {
   ready ??= (async () => {
     const base = import.meta.env.BASE_URL;
     if (!window.Go) {
@@ -54,7 +54,11 @@ export async function analyze(sources: Record<string, string>): Promise<Report> 
     void go.run(instance).catch(console.error);
     if (!window.analyzeGasScope) throw new Error('GasScope did not initialize.');
   })().catch(error => { ready = undefined; throw error; });
-  await ready;
+  return ready;
+}
+
+export async function analyze(sources: Record<string, string>): Promise<Report> {
+  await prepareAnalyzer();
   const result = window.analyzeGasScope!(JSON.stringify(sources));
   if (!result.report) throw new Error(result.error ?? 'Analysis failed.');
   return JSON.parse(result.report);

@@ -1,0 +1,234 @@
+{
+  "mode": "static",
+  "totalGas": 579,
+  "functions": [
+    {
+      "id": "tavern/leaderboard.gno:Render",
+      "name": "Render",
+      "file": "tavern/leaderboard.gno",
+      "line": 12,
+      "exported": true,
+      "estimatedGas": 7,
+      "hotspots": [],
+      "calls": [
+        {
+          "target": "tavern/leaderboard.gno:renderLeaderboard",
+          "line": 13,
+          "crossRealm": false
+        },
+        {
+          "target": "tavern/leaderboard.gno:playerNames",
+          "line": 13,
+          "crossRealm": false
+        }
+      ]
+    },
+    {
+      "id": "tavern/leaderboard.gno:renderLeaderboard",
+      "name": "renderLeaderboard",
+      "file": "tavern/leaderboard.gno",
+      "line": 16,
+      "exported": false,
+      "estimatedGas": 94,
+      "hotspots": [
+        {
+          "rule": "HOT_UFMT_SPRINTF",
+          "line": 19,
+          "estimatedGas": 40,
+          "allocRisk": "high",
+          "suggestion": "Hoist invariant formatting or use typed conversions.",
+          "before": "text := ufmt.Sprintf(\"%d\", n)",
+          "after": "text := strconv.Itoa(n)"
+        },
+        {
+          "rule": "LOOP_STRING_CONCAT",
+          "line": 19,
+          "estimatedGas": 50,
+          "allocRisk": "high",
+          "suggestion": "Accumulate text with strings.Builder.",
+          "before": "out += part",
+          "after": "builder.WriteString(part) // use builder.String() after the loop"
+        }
+      ],
+      "calls": [
+        {
+          "target": "gno.land/p/nt/ufmt/v0.Sprintf",
+          "line": 19,
+          "crossRealm": false,
+          "inLoop": true
+        }
+      ]
+    },
+    {
+      "id": "tavern/leaderboard.gno:playerNames",
+      "name": "playerNames",
+      "file": "tavern/leaderboard.gno",
+      "line": 24,
+      "exported": false,
+      "estimatedGas": 129,
+      "hotspots": [
+        {
+          "rule": "LARGE_STATE_SERIALIZE",
+          "line": 26,
+          "estimatedGas": 90,
+          "allocRisk": "high",
+          "suggestion": "Read a bounded page or maintain an incremental summary.",
+          "before": "for key, value := range state { render(key, value) }",
+          "after": "for _, key := range pageKeys { render(key, state[key]) }"
+        },
+        {
+          "rule": "UNBOUNDED_SLICE_APPEND",
+          "line": 27,
+          "estimatedGas": 35,
+          "allocRisk": "high",
+          "suggestion": "Reserve capacity using the expected result size.",
+          "before": "var out []Item",
+          "after": "out := make([]Item, 0, len(items))"
+        }
+      ],
+      "calls": [
+        {
+          "target": "append",
+          "line": 27,
+          "crossRealm": false,
+          "inLoop": true
+        }
+      ]
+    },
+    {
+      "id": "tavern/leaderboard.gno:SyncScores",
+      "name": "SyncScores",
+      "file": "tavern/leaderboard.gno",
+      "line": 32,
+      "exported": true,
+      "estimatedGas": 127,
+      "hotspots": [
+        {
+          "rule": "CROSS_REALM_IN_LOOP",
+          "line": 34,
+          "estimatedGas": 120,
+          "allocRisk": "medium",
+          "suggestion": "Batch work into a single realm crossing where supported.",
+          "before": "for _, item := range items { remote.Save(cross(cur), item) }",
+          "after": "remote.SaveBatch(cross(cur), items)"
+        }
+      ],
+      "calls": [
+        {
+          "target": "gno.land/r/demo/scoreboard.Record",
+          "line": 34,
+          "crossRealm": true,
+          "inLoop": true
+        },
+        {
+          "target": "cross",
+          "line": 34,
+          "crossRealm": false,
+          "inLoop": true
+        }
+      ]
+    },
+    {
+      "id": "tavern/leaderboard.gno:ReadScores",
+      "name": "ReadScores",
+      "file": "tavern/leaderboard.gno",
+      "line": 38,
+      "exported": true,
+      "estimatedGas": 212,
+      "hotspots": [
+        {
+          "rule": "UNBOUNDED_AVL_ITER",
+          "line": 40,
+          "estimatedGas": 80,
+          "allocRisk": "medium",
+          "suggestion": "Page by key and stop traversal at the page size.",
+          "before": "tree.Iterate(\"\", \"\", visit)",
+          "after": "tree.Iterate(cursor, end, func(k string, v interface{}) bool {\n    visit(k, v)\n    count++\n    return count >= limit\n})"
+        },
+        {
+          "rule": "LARGE_STATE_SERIALIZE",
+          "line": 40,
+          "estimatedGas": 90,
+          "allocRisk": "high",
+          "suggestion": "Read a bounded page or maintain an incremental summary.",
+          "before": "for key, value := range state { render(key, value) }",
+          "after": "for _, key := range pageKeys { render(key, state[key]) }"
+        },
+        {
+          "rule": "UNBOUNDED_SLICE_APPEND",
+          "line": 41,
+          "estimatedGas": 35,
+          "allocRisk": "high",
+          "suggestion": "Reserve capacity using the expected result size.",
+          "before": "var out []Item",
+          "after": "out := make([]Item, 0, len(items))"
+        }
+      ],
+      "calls": [
+        {
+          "target": "scores.Iterate",
+          "line": 40,
+          "crossRealm": false
+        },
+        {
+          "target": "append",
+          "line": 41,
+          "crossRealm": false,
+          "inLoop": true
+        }
+      ]
+    },
+    {
+      "id": "tavern/leaderboard.gno:RecordPlayer",
+      "name": "RecordPlayer",
+      "file": "tavern/leaderboard.gno",
+      "line": 47,
+      "exported": true,
+      "estimatedGas": 4,
+      "hotspots": [],
+      "calls": [
+        {
+          "target": "scores.Set",
+          "line": 49,
+          "crossRealm": false
+        }
+      ]
+    },
+    {
+      "id": "tavern/score.gno:UpdateScore",
+      "name": "UpdateScore",
+      "file": "tavern/score.gno",
+      "line": 3,
+      "exported": true,
+      "estimatedGas": 4,
+      "hotspots": [],
+      "calls": [
+        {
+          "target": "tavern/leaderboard.gno:RecordPlayer",
+          "line": 4,
+          "crossRealm": false
+        }
+      ]
+    },
+    {
+      "id": "tavern/score.gno:Score",
+      "name": "Score",
+      "file": "tavern/score.gno",
+      "line": 7,
+      "exported": true,
+      "estimatedGas": 1,
+      "hotspots": [],
+      "calls": []
+    },
+    {
+      "id": "tavern/score.gno:IsRegistered",
+      "name": "IsRegistered",
+      "file": "tavern/score.gno",
+      "line": 11,
+      "exported": true,
+      "estimatedGas": 1,
+      "hotspots": [],
+      "calls": []
+    }
+  ]
+}
