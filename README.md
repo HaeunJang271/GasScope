@@ -1,67 +1,73 @@
 # GasScope
 
-GasScope profiles Gno.land realms with a Go CLI, a reusable benchmark package, an Onyx registry, and a browser dashboard.
+Static Gas & Allocation Profiler + FlameGraph IDE + On-Chain Registry for Gno.land
 
-## CLI
+- [Web App](https://gas-scope-sigma.vercel.app)
+- [On-Chain Registry (`gasscope_reg` on Onyx)](https://onyx.testnets.gno.land/r/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasscope_reg)
+
+<!-- TODO: Add YouTube demo video link -->
+
+## Try the web app
+
+1. Open **Demo**, select a function in the FlameGraph, and compare its current gas estimate with the estimate after fixing its hotspots. Switch to **Call tree** to trace calls and realm crossings.
+2. Open **Live**, enter a realm such as `gno.land/r/gnoland/blog`, and select **Analyze realm**. GasScope fetches public source from Onyx and analyzes it in your browser. You can also import a CLI JSON report.
+3. Open **Leaderboard** to browse submissions or publish your report with Adena on Onyx (`onyx-1`). Imported reports require a realm path. The registry ranks profiles by estimated gas points and marks submitter attestations.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    AST["Go AST Analyzer<br/>internal/profile"]
+    WASM["Browser WASM Engine<br/>cmd/browser"]
+    Web["React FlameGraph &amp; Onyx Live Analyzer<br/>web/"]
+    Registry["Onyx Registry Realm<br/>realms/gasscope_reg + p/gasbench"]
+    AST -->|shared analysis rules| WASM
+    AST -->|CLI JSON report| Web
+    WASM -->|browser profile| Web
+    Web -->|Adena submission| Registry
+    Registry -->|leaderboard reads| Web
+```
+
+The CLI and browser share the Go analyzer. The browser reads realm source through Onyx's `vm/qfile` endpoint. The registry stores caller-owned reports up to 32 KiB. The reusable Gno package `p/gasbench` lives in `packages/gasbench` and lets realm authors count operations and assert budgets.
+
+## Static hotspot rules
+
+| Rule | What it flags |
+| --- | --- |
+| `CROSS_REALM_IN_LOOP` | Cross-realm calls inside a loop |
+| `UNBOUNDED_AVL_ITER` | AVL iteration without a visible bound |
+| `LOOP_STRING_CONCAT` | Repeated string concatenation inside a loop |
+| `UNBOUNDED_SLICE_APPEND` | Slice growth from appends inside a loop |
+| `LARGE_STATE_SERIALIZE` | Serialization of potentially large state |
+| `STORAGE_WRITE_IN_LOOP` | Repeated storage writes inside a loop |
+
+Static gas points combine function and call-site costs with rule penalties. Fixable savings estimates the effect of removing those penalties. Actual VM gas depends on execution paths and input sizes. When available, the benchmark command reports VM gas and elapsed time from `gno test -v`.
+
+## Quickstart
+
+### CLI
+
+From the repository root, run either command to generate `gasscope-report.json` and `gasscope-report.svg`.
 
 ```sh
 go run ./cmd/gasscope analyze ./...
-go run ./cmd/gasscope analyze path/to/realm.gno
-go run ./cmd/gasscope bench ./packages/gasbench
+go run ./cmd/gasscope bench ./...
 ```
 
-Both commands write `gasscope-report.json` and `gasscope-report.svg` to the working directory. Directory targets scan recursively. The JSON includes function declarations, source locations, calls, realm crossings, and six hotspot rules with allocation risk and suggested code changes. Versioned package imports and package-local calls are resolved from source where possible.
+Install the Gno CLI to collect test measurements. Without it, `bench` produces a static report with a fallback note.
 
-Estimated gas points are a heuristic. Each function starts with one point, each call site adds three, and each hotspot contributes its rule weight. Compare scores from the same analyzer version. Dynamic dispatch, execution counts, and the actual cost of a crossing require runtime measurements.
+### GitHub Actions CI
 
-`bench` runs `gno test -v` in each discovered Gno package directory. Verbose Gno test output supplies elapsed milliseconds and, when available, measured VM gas by test. The timing resolution is whatever the Gno CLI prints. Individual production functions are visible in the static call graph. Failed test runs still write the reports and return a nonzero exit code. If `gno` is missing, the command produces a static report with a fallback note.
+The included PR workflow runs automatically in this repository. To use it in another repository containing the GasScope CLI source, copy [the workflow](.github/workflows/gasscope-ci.yml) to `.github/workflows/action.yml`. It runs static analysis on pull requests, uploads the JSON and SVG reports, and compares the score with the base commit. Set the repository variable `GASSCOPE_MAX_INCREASE` to a nonnegative integer to enforce a gas-point budget.
 
-## Reusable benchmark package
+### Local Web UI
 
-After deployment, import `gno.land/p/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasbench` in a realm or test. Count operations at the call sites you want to budget.
-
-```go
-b := gasbench.Begin("load page")
-for range records {
-    b.AddOps(1)
-}
-result := b.End()
-gasbench.AssertBudget(result.Ops, 100)
-markdown := gasbench.FormatMarkdown([]gasbench.Result{result})
-```
-
-## Dashboard
+With Node.js 22 and Go on your PATH, run the following and open the URL printed by Vite.
 
 ```sh
 cd web
 npm ci
 npm run dev
-npm run build
 ```
 
-Node 22 and a Go toolchain on PATH build the React app and its Go WebAssembly module. The dashboard opens with bundled demo source. Use **Live Onyx Analyzer** with `gno.land/r/gnoland/blog` or another full realm path, or import CLI JSON. The browser fetches public source with `vm/qfile` and runs the same rules as the CLI. The call tree expands resolved local calls and labels realm crossings.
-
-The default RPC is `https://rpc.onyx.testnets.gno.land` on chain `onyx-1`. Set `VITE_ONYX_RPC` to a CORS-enabled endpoint if needed. Set `VITE_REGISTRY_PATH` to the deployed registry package path at build time. Imported reports require a realm path for registration. Live reports carry their source realm path.
-
-## Onyx registry
-
-The source targets Gno v1.8 with `gnomod.toml` and crossing functions that take `cur realm`. The default package path is `gno.land/r/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasscope_reg`. Deploy to a namespace controlled by your funded Onyx signer. If using a different namespace, update the module path in `gnomod.toml` and the dashboard's registry path. Example deployment with an existing gnokey account:
-
-```sh
-gnokey maketx addpkg -pkgpath gno.land/r/g1832jd5gytypzj48d0328r2sqvv2x38zj0zryuq/gasscope_reg \
-  -pkgdir ./realms/gasscope_reg -gas-fee 1000000ugnot -gas-wanted 20000000 \
-  -broadcast -chainid onyx-1 -remote https://rpc.onyx.testnets.gno.land:443 YOUR_KEY
-```
-
-`Render("")` shows the top 20 submissions by estimated gas points across the registry. Higher scores rank first and newer submissions break ties. `Render("profiles/0")` exposes the same page as JSON. `ListProfiles(offset)`, `GetProfileCount()`, and `GetReportJSON(id)` expose registry reads. Each submission stores a caller-owned report payload of up to 32 KiB. `VerifyProfile` records a submitter attestation. Submitted metrics and report payloads are self-reported.
-
-## Verification and CI
-
-```sh
-go test ./...
-(cd packages/gasbench && gno test)
-(cd realms/gasscope_reg && gno test)
-(cd web && npm run build)
-```
-
-The PR workflow uploads JSON and SVG and compares estimated points against the base commit. Set the repository variable `GASSCOPE_MAX_INCREASE` to a nonnegative integer to enforce an increase budget.
+Run `npm run build` in `web/` for a production build and `go test ./...` from the repository root to verify the Go code.

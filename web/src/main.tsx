@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity, ArrowDownToLine, ArrowRight, Braces, ChevronDown, ChevronRight, CircleAlert,
-  Code2, FileCode2, Flame, GitBranch, Globe2, Layers3, RefreshCw, Search, Trophy, Upload, Wallet, Zap,
+  BadgeCheck, Code2, FileCode2, Flame, GitBranch, Globe2, Layers3, RefreshCw, Search, TrendingDown, Trophy, Upload, Wallet, Zap,
 } from 'lucide-react';
 import { demo, prepareAnalyzer, readReport, type FunctionProfile, type Report } from './profile';
 import { analyzeRealm, getLeaderboard, normalizeRealm, registry, submitProfile, type Leaderboard, type RegistryRow } from './onyx';
@@ -16,9 +16,9 @@ const number = new Intl.NumberFormat('en-US');
 const format = (n: number) => number.format(n);
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const tabs = [
-  { id: 'flame', name: 'FlameGraph & Call Tree', Icon: Flame },
-  { id: 'live', name: 'Live Onyx Analyzer', Icon: Globe2 },
-  { id: 'leaderboard', name: 'On-Chain Leaderboard', Icon: Trophy },
+  { id: 'flame', name: 'Profiler', Icon: Flame },
+  { id: 'live', name: 'Live', Icon: Globe2 },
+  { id: 'leaderboard', name: 'Leaderboard', Icon: Trophy },
 ] as const;
 
 function download(report: Report) {
@@ -144,7 +144,7 @@ function App() {
         {tab === 'flame' && <button className="button export" onClick={() => download(session.report)}><ArrowDownToLine size={16}/> Export JSON</button>}
       </div>
       <nav className="navigation" aria-label="GasScope views">
-        {tabs.map(({ id, name, Icon }) => <button key={id} onClick={() => switchTab(id)} aria-current={tab === id ? 'page' : undefined}><Icon size={16}/>{name}</button>)}
+        {tabs.map(({ id, name, Icon }) => <button key={id} onClick={() => switchTab(id)} aria-current={tab === id ? 'page' : undefined}><Icon size={16}/>{id === 'flame' && session.kind === 'demo' ? 'Demo' : name}</button>)}
       </nav>
       {error && <div className="notice error" role="alert"><CircleAlert size={17}/>{error}</div>}
       {tab === 'flame' && <Profiler key={session.name + session.kind} session={session}/>}
@@ -171,7 +171,9 @@ function App() {
               {leader.rows.length === 0 ? <p>No submissions on this page.</p> : <div className="table-scroll"><table>
                 <thead><tr><th>ID / Realm</th><th>Gas points</th><th>Hotspots</th><th>Attestation</th></tr></thead>
                 <tbody>{leader.rows.map(row => <tr key={row.id}><td><code title={row.owner}>#{row.id} {row.realmPath}</code><small>{row.topRule}</small></td>
-                  <td>{format(row.totalGas)}</td><td>{row.hotspotsCount}</td><td>{leader.kind === 'preview' ? 'Sample' : row.verified ? 'Attested' : 'Pending'}</td></tr>)}</tbody>
+                  <td>{format(row.totalGas)}</td><td>{row.hotspotsCount}</td><td>{leader.kind === 'preview' ? 'Sample' : row.verified
+                    ? <span className="verified" title="Attested by the submitter"><BadgeCheck size={14}/> Attested</span>
+                    : 'Pending'}</td></tr>)}</tbody>
               </table></div>}
               {leader.rows.length > 0 && <RegistryChart rows={leader.rows}/>}
               {leader.kind === 'live' && <>
@@ -207,6 +209,11 @@ function RegistryChart({ rows }: { rows: RegistryRow[] }) {
   </div>;
 }
 
+function fixableGas(fn: FunctionProfile) {
+  const penalties = fn.hotspots.reduce((sum, h) => sum + Math.max(0, h.estimatedGas), 0);
+  return Math.min(penalties, Math.max(0, fn.estimatedGas));
+}
+
 function Profiler({ session }: { session: Session }) {
   const { report, sources } = session;
   const sorted = [...report.functions].sort((a, b) => b.estimatedGas - a.estimatedGas);
@@ -215,6 +222,8 @@ function Profiler({ session }: { session: Session }) {
   const [view, setView] = useState<'gas' | 'tree'>('gas');
   const active = sorted.find(f => f.id === selected) ?? sorted[0];
   const totalHotspots = sorted.reduce((sum, f) => sum + f.hotspots.length, 0);
+  const potentialGasSaved = Math.min(report.totalGas, sorted.reduce((sum, f) => sum + fixableGas(f), 0));
+  const savingsPct = report.totalGas > 0 ? Math.round(potentialGasSaved / report.totalGas * 100) : 0;
   const crossings = sorted.reduce((sum, f) => sum + f.calls.filter(c => c.crossRealm).length, 0);
   const max = Math.max(1, sorted[0]?.estimatedGas ?? 0);
   const filtered = sorted.filter(f => (f.id + ' ' + f.name).toLowerCase().includes(search.trim().toLowerCase()));
@@ -235,6 +244,10 @@ function Profiler({ session }: { session: Session }) {
         <div className="metric-label"><span>{label}</span><Icon size={17} className={tone}/></div>
         <strong>{format(value)}</strong><p>{detail}</p>
       </div>)}
+      <div className="metric panel savings">
+        <div className="metric-label"><span>Fixable savings</span><TrendingDown size={17}/></div>
+        <strong>~{savingsPct}%</strong><p>{format(potentialGasSaved)} pts saved if fixed</p>
+      </div>
     </div>
     <div className="profile-grid">
       <section className="panel chart">
@@ -298,6 +311,7 @@ function Inspector({ fn, source, total }: { fn: FunctionProfile; source?: string
     <h3>{fn.name}<span>()</span></h3>
     <div className="source-location"><FileCode2 size={14}/><span title={fn.file}>{fn.file.split('/').at(-1)}:{fn.line}</span><span className="visibility">{fn.exported ? 'exported' : 'internal'}</span></div>
     <div className="function-stats"><span><strong>{format(fn.estimatedGas)}</strong> gas points</span><span><strong>{total ? (fn.estimatedGas / total * 100).toFixed(1) : '0'}%</strong> of profile</span></div>
+    {fn.hotspots.length > 0 && <p className="fix-estimate">Estimated gas if fixed <strong>{format(fn.estimatedGas)} → {format(fn.estimatedGas - fixableGas(fn))} pts</strong></p>}
     <div className="section-label">HOTSPOTS <span>{fn.hotspots.length}</span></div>
     {fn.hotspots.length === 0 && <p className="muted">No hotspot rules triggered.</p>}
     {fn.hotspots.map((h, index) => <details className="rule" key={h.rule + h.line} open={index === 0 || undefined}>

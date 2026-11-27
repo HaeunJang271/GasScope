@@ -91,8 +91,44 @@ export async function submitProfile(realm: string, report: Report): Promise<stri
   const hotspots = report.functions.flatMap(f => f.hotspots);
   const top = hotspots.reduce<(typeof hotspots)[number] | undefined>((best, h) =>
     !best || h.estimatedGas > best.estimatedGas ? h : best, undefined);
-  const json = JSON.stringify(report);
-  if (new TextEncoder().encode(json).length > 32768) throw new Error('This report exceeds the registry’s 32 KiB limit.');
+  const encoder = new TextEncoder();
+  let json = JSON.stringify(report);
+  if (encoder.encode(json).length > 32000) {
+    const compact = {
+      totalGas: report.totalGas,
+      mode: report.mode,
+      tests: report.tests,
+      functions: report.functions.map(f => ({
+        id: f.id,
+        name: f.name,
+        file: f.file,
+        line: f.line,
+        estimatedGas: f.estimatedGas,
+        crossRealmCalls: f.calls.filter(call => call.crossRealm).length,
+        hotspots: f.hotspots.map(h => ({
+          rule: h.rule,
+          line: h.line,
+          estimatedGas: h.estimatedGas,
+          message: h.suggestion,
+          fix: h.after,
+          snippet: h.before.slice(0, 120),
+        })),
+      })),
+    };
+    json = JSON.stringify(compact);
+    if (encoder.encode(json).length > 32000) {
+      json = JSON.stringify({
+        ...compact,
+        functions: compact.functions.map(f => ({
+          ...f,
+          hotspots: f.hotspots.map(({ snippet, ...hotspot }) => hotspot),
+        })),
+      });
+    }
+    if (encoder.encode(json).length > 32768) {
+      throw new Error('This report exceeds the registry’s 32 KiB limit.');
+    }
+  }
   const wallet = window.adena;
   if (!wallet) throw new Error('Install the Adena browser extension to submit a profile.');
   const connection = await wallet.AddEstablish('GasScope');
